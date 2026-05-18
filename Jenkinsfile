@@ -4,13 +4,14 @@ pipeline {
 
     environment {
         IMAGE_NAME = "soc-demo"
-        TESTS_REQUIRED = "false"
     }
 
     stages {
 
         stage('Build') {
             steps {
+                echo 'Starting Build Stage'
+
                 sh 'chmod +x build.sh'
                 sh './build.sh'
             }
@@ -18,43 +19,58 @@ pipeline {
 
         stage('Test') {
             steps {
-                script {
-                    if (env.TESTS_REQUIRED == 'true') {
-                        sh 'chmod +x test.sh'
-                        sh './test.sh'
-                    } else {
-                        echo 'Tests pending'
-                    }
-                }
+                echo 'Starting Test Stage'
+
+                sh 'chmod +x test.sh'
+                sh './test.sh'
             }
         }
 
         stage('Docker Build') {
             steps {
+                echo 'Building Docker Image'
+
                 sh 'docker build -t $IMAGE_NAME:$BUILD_NUMBER .'
+
+                sh 'docker tag $IMAGE_NAME:$BUILD_NUMBER $IMAGE_NAME:latest'
             }
         }
 
         stage('Deploy Dev') {
-           
             steps {
+                echo 'Deploying Application'
+
                 sh 'chmod +x deploy.sh'
                 sh './deploy.sh dev $BUILD_NUMBER'
             }
         }
-    
+
+        stage('Health Check') {
+            steps {
+                echo 'Checking Application Health'
+
+                sh 'sleep 10'
+
+                sh 'curl http://host.docker.internal:5001/health'
+            }
+        }
+    }
 
     post {
 
         success {
-            echo 'Pipeline Passed'
+            echo 'Pipeline Executed Successfully'
         }
 
         failure {
-            echo 'Pipeline Failed'
+            echo 'Pipeline Failed - Starting Rollback'
 
             sh 'chmod +x rollback.sh'
             sh './rollback.sh'
+        }
+
+        always {
+            echo 'Pipeline Execution Finished'
         }
     }
 }
