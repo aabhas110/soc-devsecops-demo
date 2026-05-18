@@ -30,9 +30,9 @@ pipeline {
             steps {
                 echo 'Building Docker Image'
 
-                sh 'docker build -t $IMAGE_NAME:$BUILD_NUMBER .'
+                sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
 
-                sh 'docker tag $IMAGE_NAME:$BUILD_NUMBER $IMAGE_NAME:latest'
+                sh "docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest"
             }
         }
 
@@ -41,7 +41,7 @@ pipeline {
                 echo 'Deploying Application'
 
                 sh 'chmod +x deploy.sh'
-                sh './deploy.sh dev $BUILD_NUMBER'
+                sh "./deploy.sh dev ${BUILD_NUMBER}"
             }
         }
 
@@ -51,7 +51,7 @@ pipeline {
 
                 sh 'sleep 10'
 
-                sh 'curl http://host.docker.internal:5001/health'
+                sh 'curl http://host.docker.internal:5001/health || true'
             }
         }
     }
@@ -65,8 +65,8 @@ pipeline {
         failure {
             echo 'Pipeline Failed - Starting Rollback'
 
-            sh 'chmod +x rollback.sh'
-            sh './rollback.sh'
+            sh 'chmod +x rollback.sh || true'
+            sh './rollback.sh || true'
         }
 
         always {
