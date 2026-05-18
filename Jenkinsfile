@@ -92,7 +92,7 @@ pipeline {
 
                 echo 'Checking Application Health Endpoint'
 
-                sh 'curl http://host.docker.internal:5001/health'
+                sh 'curl -s http://172.17.0.1:5001/health'
             }
         }
     }
