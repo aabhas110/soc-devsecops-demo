@@ -8,6 +8,23 @@ pipeline {
 
     stages {
 
+        stage('Checkout') {
+            steps {
+                echo 'Checking out source code'
+
+                checkout scm
+
+                script {
+                    env.COMMIT_SHA = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+
+                    echo "Git Commit SHA: ${env.COMMIT_SHA}"
+                }
+            }
+        }
+
         stage('Build') {
             steps {
                 echo 'Starting Build Stage'
@@ -26,32 +43,56 @@ pipeline {
             }
         }
 
-        stage('Docker Build') {
+        stage('Docker Build & Tagging') {
             steps {
+
                 echo 'Building Docker Image'
 
-                sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
+                sh """
+                    docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} .
 
-                sh "docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest"
+                    docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
+
+                    docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:${COMMIT_SHA}
+                """
+
+                echo "Docker Image Tags Created:"
+                echo "${IMAGE_NAME}:${BUILD_NUMBER}"
+                echo "${IMAGE_NAME}:latest"
+                echo "${IMAGE_NAME}:${COMMIT_SHA}"
+            }
+        }
+
+        stage('Docker Image Verification') {
+            steps {
+
+                echo 'Listing Docker Images'
+
+                sh "docker images | grep ${IMAGE_NAME} || true"
             }
         }
 
         stage('Deploy Dev') {
             steps {
-                echo 'Deploying Application'
+
+                echo 'Deploying Application to DEV Environment'
 
                 sh 'chmod +x deploy.sh'
+
                 sh "./deploy.sh dev ${BUILD_NUMBER}"
             }
         }
 
         stage('Health Check') {
             steps {
-                echo 'Checking Application Health'
+
+                echo 'Waiting for container startup'
 
                 sh 'sleep 10'
 
-                sh 'curl http://host.docker.internal:5001/health || true'
+                echo 'Checking Application Health Endpoint'
+
+                sh 'curl http://host.docker.internal:5001/health'
             }
         }
     }
@@ -59,18 +100,28 @@ pipeline {
     post {
 
         success {
+
             echo 'Pipeline Executed Successfully'
+
+            echo "Stable Build Number: ${BUILD_NUMBER}"
+
+            echo "Stable Commit SHA: ${COMMIT_SHA}"
         }
 
         failure {
+
             echo 'Pipeline Failed - Starting Rollback'
 
             sh 'chmod +x rollback.sh || true'
+
             sh './rollback.sh || true'
         }
 
         always {
+
             echo 'Pipeline Execution Finished'
+
+            sh 'docker ps || true'
         }
     }
 }
