@@ -1,5 +1,9 @@
 #!/bin/bash
 
-echo "SOC Test Stageis there hi there aabhas "
-echo " hi 
-echo " hi "
+echo "SOC Test Stage"
+
+echo "Hi there Aabhas"
+
+echo "Running basic tests..."
+
+exit 0
