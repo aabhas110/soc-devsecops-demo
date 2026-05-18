@@ -36,16 +36,13 @@ pipeline {
         }
 
         stage('Deploy Dev') {
-            when {
-                branch 'main'
-            }
-
+           
             steps {
                 sh 'chmod +x deploy.sh'
                 sh './deploy.sh dev $BUILD_NUMBER'
             }
         }
-    }
+    
 
     post {
 
