@@ -1,36 +1,18 @@
-# ─────────────────────────────────────────────
-# SENTINEL AI — Frontend Dockerfile
-# Node 20 | Next.js 14
-# ─────────────────────────────────────────────
-FROM node:20-alpine AS deps
-WORKDIR /app
-COPY package.json ./
-RUN npm install --frozen-lockfile 2>/dev/null || npm install
+FROM python:3.11-slim
 
-FROM node:20-alpine AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+
+# Install curl for health checks
+RUN apt-get update && apt-get install -y curl
+
+COPY requirements.txt .
+
+RUN pip install -r requirements.txt
+
 COPY . .
 
-# Backend URL for build-time env (overridden at runtime via env)
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+EXPOSE 5000
 
-FROM node:20-alpine AS runner
-WORKDIR /app
+HEALTHCHECK CMD curl --fail http://localhost:5000/health || exit 1
 
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-
-COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-USER nextjs
-EXPOSE 3000
-ENV PORT=3000
-
-CMD ["node", "server.js"]
+CMD ["python", "app.py"]
