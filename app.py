@@ -4,7 +4,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "SOC DevSecOps Pipeline Running"
+    return "SOC Pipeline Auto Updated"
 
 @app.route("/health")
 def health():

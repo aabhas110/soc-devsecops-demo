@@ -1,3 +1,4 @@
 #!/bin/bash
 
-echo "SOC Test Stage"
+echo "SOC Test Stageis there hi there aabhas "
+echo " hi "
