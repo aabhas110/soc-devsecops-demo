@@ -1,39 +1,36 @@
-FROM python:3.11-slim
-
-# Prevent Python from writing pyc files
-ENV PYTHONDONTWRITEBYTECODE=1
-
-# Ensure logs appear instantly
-ENV PYTHONUNBUFFERED=1
-
-# Set working directory
+# ─────────────────────────────────────────────
+# SENTINEL AI — Frontend Dockerfile
+# Node 20 | Next.js 14
+# ─────────────────────────────────────────────
+FROM node:20-alpine AS deps
 WORKDIR /app
+COPY package.json ./
+RUN npm install --frozen-lockfile 2>/dev/null || npm install
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first for Docker layer caching
-COPY requirements.txt .
-
-# Upgrade pip and install dependencies
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-
-# Copy application source
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Expose Flask application port
-EXPOSE 5000
+# Backend URL for build-time env (overridden at runtime via env)
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
 
-# Container health monitoring
-HEALTHCHECK --interval=30s \
-            --timeout=10s \
-            --start-period=15s \
-            --retries=3 \
-CMD curl --fail http://localhost:5000/health || exit 1
+FROM node:20-alpine AS runner
+WORKDIR /app
 
-# Start application
-CMD ["python", "app.py"]
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+EXPOSE 3000
+ENV PORT=3000
+
+CMD ["node", "server.js"]
