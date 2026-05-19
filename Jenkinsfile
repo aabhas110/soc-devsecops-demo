@@ -2,8 +2,17 @@ pipeline {
 
     agent any
 
+    parameters {
+        string(name: 'APP_NAME', defaultValue: 'soc-demo', description: 'Application / Docker image name')
+        string(name: 'APP_PORT', defaultValue: '5001', description: 'Host port for application')
+        string(name: 'CONTAINER_PORT', defaultValue: '5000', description: 'Container port exposed by app')
+        string(name: 'HEALTH_ENDPOINT', defaultValue: '/health', description: 'Application health endpoint')
+        string(name: 'DEPLOY_ENV', defaultValue: 'dev', description: 'Deployment environment')
+    }
+
     environment {
-        IMAGE_NAME = "soc-demo"
+        IMAGE_NAME = "${params.APP_NAME}"
+        CONTAINER_NAME = "${params.APP_NAME}-${params.DEPLOY_ENV}"
     }
 
     stages {
@@ -11,7 +20,6 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo 'Checking out source code'
-
                 checkout scm
 
                 script {
@@ -29,8 +37,14 @@ pipeline {
             steps {
                 echo 'Starting Build Stage'
 
-                sh 'chmod +x build.sh'
-                sh './build.sh'
+                script {
+                    if (fileExists('build.sh')) {
+                        sh 'chmod +x build.sh'
+                        sh './build.sh'
+                    } else {
+                        echo 'build.sh not found, skipping build stage'
+                    }
+                }
             }
         }
 
@@ -38,14 +52,19 @@ pipeline {
             steps {
                 echo 'Starting Test Stage'
 
-                sh 'chmod +x test.sh'
-                sh './test.sh'
+                script {
+                    if (fileExists('test.sh')) {
+                        sh 'chmod +x test.sh'
+                        sh './test.sh'
+                    } else {
+                        echo 'test.sh not found, skipping test stage'
+                    }
+                }
             }
         }
 
         stage('Docker Build & Tagging') {
             steps {
-
                 echo 'Building Docker Image'
 
                 sh """
@@ -65,34 +84,47 @@ pipeline {
 
         stage('Docker Image Verification') {
             steps {
-
                 echo 'Listing Docker Images'
-
                 sh "docker images | grep ${IMAGE_NAME} || true"
             }
         }
 
-        stage('Deploy Dev') {
+        stage('Deploy') {
             steps {
+                echo "Deploying ${IMAGE_NAME} to ${params.DEPLOY_ENV}"
 
-                echo 'Deploying Application to DEV Environment'
+                script {
+                    if (fileExists('deploy.sh')) {
+                        sh 'chmod +x deploy.sh'
+                        sh "./deploy.sh ${params.DEPLOY_ENV} ${BUILD_NUMBER}"
+                    } else {
+                        echo 'deploy.sh not found, using default Docker deployment'
 
-                sh 'chmod +x deploy.sh'
+                        sh """
+                            docker stop ${CONTAINER_NAME} || true
+                            docker rm ${CONTAINER_NAME} || true
 
-                sh "./deploy.sh dev ${BUILD_NUMBER}"
+                            docker run -d \
+                                --name ${CONTAINER_NAME} \
+                                -p ${params.APP_PORT}:${params.CONTAINER_PORT} \
+                                --restart unless-stopped \
+                                ${IMAGE_NAME}:${BUILD_NUMBER}
+                        """
+                    }
+                }
             }
         }
 
         stage('Health Check') {
             steps {
-
                 echo 'Waiting for container startup'
-
                 sh 'sleep 10'
 
                 echo 'Checking Application Health Endpoint'
 
-                sh 'curl -s http://172.17.0.1:5001/health'
+                sh """
+                    curl -f http://172.17.0.1:${params.APP_PORT}${params.HEALTH_ENDPOINT}
+                """
             }
         }
     }
@@ -100,28 +132,30 @@ pipeline {
     post {
 
         success {
-
             echo 'Pipeline Executed Successfully'
-
+            echo "Application Name: ${IMAGE_NAME}"
+            echo "Environment: ${params.DEPLOY_ENV}"
             echo "Stable Build Number: ${BUILD_NUMBER}"
-
             echo "Stable Commit SHA: ${COMMIT_SHA}"
         }
 
         failure {
-
             echo 'Pipeline Failed - Starting Rollback'
 
-            sh 'chmod +x rollback.sh || true'
-
-            sh './rollback.sh || true'
+            script {
+                if (fileExists('rollback.sh')) {
+                    sh 'chmod +x rollback.sh || true'
+                    sh './rollback.sh || true'
+                } else {
+                    echo 'rollback.sh not found, skipping rollback'
+                }
+            }
         }
 
         always {
-
             echo 'Pipeline Execution Finished'
-
             sh 'docker ps || true'
+            sh "docker images | grep ${IMAGE_NAME} || true"
         }
     }
 }
