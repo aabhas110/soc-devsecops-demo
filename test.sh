@@ -1,11 +1,10 @@
 #!/bin/bash
 
-echo "SOC Test Stage"
+set -e
 
-echo "Hi there Aabhas"
+echo "SOC Test Stage Started"
 
-echo "Running basic tests..."
+python -m py_compile app.py
 
-echo "hat"
-
-exit 0
+echo "Python syntax check passed"
+echo "SOC Test Stage Completed"

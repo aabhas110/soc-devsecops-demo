@@ -1,14 +1,32 @@
 #!/bin/bash
 
+set -e
+
 ENV=$1
-SHA=$2
+BUILD_NUMBER_ARG=$2
 
-echo "Deploying ${SHA} to ${ENV}"
+APP_NAME=${APP_NAME:-soc-demo}
+APP_PORT=${APP_PORT:-5001}
+CONTAINER_PORT=${CONTAINER_PORT:-5000}
+CONTAINER_NAME="${APP_NAME}-${ENV}"
+IMAGE_TAG="${APP_NAME}:${BUILD_NUMBER_ARG}"
 
-docker stop soc-dev || true
-docker rm soc-dev || true
+echo "Deploying application"
+echo "Environment: ${ENV}"
+echo "Build Number: ${BUILD_NUMBER_ARG}"
+echo "App Name: ${APP_NAME}"
+echo "Container Name: ${CONTAINER_NAME}"
+echo "Image Tag: ${IMAGE_TAG}"
+echo "Port Mapping: ${APP_PORT}:${CONTAINER_PORT}"
+
+docker stop "${CONTAINER_NAME}" || true
+docker rm "${CONTAINER_NAME}" || true
 
 docker run -d \
-  --name soc-dev \
-  -p 5001:5000 \
-  soc-demo:${BUILD_NUMBER}
+  --name "${CONTAINER_NAME}" \
+  -p "${APP_PORT}:${CONTAINER_PORT}" \
+  --restart unless-stopped \
+  "${IMAGE_TAG}"
+
+echo "Deployment completed"
+docker ps --filter "name=${CONTAINER_NAME}"

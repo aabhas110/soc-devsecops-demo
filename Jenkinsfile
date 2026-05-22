@@ -13,6 +13,8 @@ pipeline {
     environment {
         IMAGE_NAME = "${params.APP_NAME}"
         CONTAINER_NAME = "${params.APP_NAME}-${params.DEPLOY_ENV}"
+        RESTORE_DIR = "/var/jenkins_home/restore-points"
+        AIOPS_DIR = "/var/jenkins_home/aiops-reports"
     }
 
     stages {
@@ -37,14 +39,14 @@ pipeline {
             steps {
                 echo 'Starting Build Stage'
 
-                script {
-                    if (fileExists('build.sh')) {
-                        sh 'chmod +x build.sh'
-                        sh './build.sh'
-                    } else {
-                        echo 'build.sh not found, skipping build stage'
-                    }
-                }
+                sh '''
+                    if [ -f build.sh ]; then
+                        chmod +x build.sh
+                        ./build.sh
+                    else
+                        echo "build.sh not found, skipping build stage"
+                    fi
+                '''
             }
         }
 
@@ -52,14 +54,14 @@ pipeline {
             steps {
                 echo 'Starting Test Stage'
 
-                script {
-                    if (fileExists('test.sh')) {
-                        sh 'chmod +x test.sh'
-                        sh './test.sh'
-                    } else {
-                        echo 'test.sh not found, skipping test stage'
-                    }
-                }
+                sh '''
+                    if [ -f test.sh ]; then
+                        chmod +x test.sh
+                        ./test.sh
+                    else
+                        echo "test.sh not found, skipping test stage"
+                    fi
+                '''
             }
         }
 
@@ -67,13 +69,11 @@ pipeline {
             steps {
                 echo 'Building Docker Image'
 
-                sh """
+                sh '''
                     docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} .
-
                     docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
-
                     docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:${COMMIT_SHA}
-                """
+                '''
 
                 echo "Docker Image Tags Created:"
                 echo "${IMAGE_NAME}:${BUILD_NUMBER}"
@@ -85,7 +85,9 @@ pipeline {
         stage('Docker Image Verification') {
             steps {
                 echo 'Listing Docker Images'
-                sh "docker images | grep ${IMAGE_NAME} || true"
+                sh '''
+                    docker images | grep ${IMAGE_NAME} || true
+                '''
             }
         }
 
@@ -93,25 +95,14 @@ pipeline {
             steps {
                 echo "Deploying ${IMAGE_NAME} to ${params.DEPLOY_ENV}"
 
-                script {
-                    if (fileExists('deploy.sh')) {
-                        sh 'chmod +x deploy.sh'
-                        sh "./deploy.sh ${params.DEPLOY_ENV} ${BUILD_NUMBER}"
-                    } else {
-                        echo 'deploy.sh not found, using default Docker deployment'
+                sh '''
+                    chmod +x deploy.sh
 
-                        sh """
-                            docker stop ${CONTAINER_NAME} || true
-                            docker rm ${CONTAINER_NAME} || true
-
-                            docker run -d \
-                                --name ${CONTAINER_NAME} \
-                                -p ${params.APP_PORT}:${params.CONTAINER_PORT} \
-                                --restart unless-stopped \
-                                ${IMAGE_NAME}:${BUILD_NUMBER}
-                        """
-                    }
-                }
+                    APP_NAME=${IMAGE_NAME} \
+                    APP_PORT=${APP_PORT} \
+                    CONTAINER_PORT=${CONTAINER_PORT} \
+                    ./deploy.sh ${DEPLOY_ENV} ${BUILD_NUMBER}
+                '''
             }
         }
 
@@ -122,9 +113,36 @@ pipeline {
 
                 echo 'Checking Application Health Endpoint'
 
-                sh """
-                    curl -f http://172.17.0.1:${params.APP_PORT}${params.HEALTH_ENDPOINT}
-                """
+                sh '''
+                    curl -f http://172.17.0.1:${APP_PORT}${HEALTH_ENDPOINT}
+                '''
+            }
+        }
+
+        stage('Save Restore Point') {
+            steps {
+                echo 'Saving restore point for last successful deployment'
+
+                sh '''
+                    mkdir -p ${RESTORE_DIR}
+
+                    cat > ${RESTORE_DIR}/${IMAGE_NAME}-last-successful.env <<EOF
+APP_NAME=${IMAGE_NAME}
+BUILD_NUMBER=${BUILD_NUMBER}
+COMMIT_SHA=${COMMIT_SHA}
+IMAGE_TAG=${IMAGE_NAME}:${BUILD_NUMBER}
+CONTAINER_NAME=${CONTAINER_NAME}
+APP_PORT=${APP_PORT}
+CONTAINER_PORT=${CONTAINER_PORT}
+HEALTH_ENDPOINT=${HEALTH_ENDPOINT}
+DEPLOY_ENV=${DEPLOY_ENV}
+EOF
+
+                    echo "Restore point saved:"
+                    cat ${RESTORE_DIR}/${IMAGE_NAME}-last-successful.env
+                '''
+
+                archiveArtifacts artifacts: '**/*last-successful.env', allowEmptyArchive: true, fingerprint: true
             }
         }
     }
@@ -140,22 +158,40 @@ pipeline {
         }
 
         failure {
-            echo 'Pipeline Failed - Starting Rollback'
+            echo 'Pipeline Failed - Starting AIOps Log Collection'
 
-            script {
-                if (fileExists('rollback.sh')) {
-                    sh 'chmod +x rollback.sh || true'
-                    sh './rollback.sh || true'
-                } else {
-                    echo 'rollback.sh not found, skipping rollback'
-                }
-            }
+            sh '''
+                mkdir -p ${AIOPS_DIR}/${IMAGE_NAME}-${BUILD_NUMBER}
+
+                docker ps -a > ${AIOPS_DIR}/${IMAGE_NAME}-${BUILD_NUMBER}/docker-ps.txt || true
+                docker images | grep ${IMAGE_NAME} > ${AIOPS_DIR}/${IMAGE_NAME}-${BUILD_NUMBER}/docker-images.txt || true
+                docker logs ${CONTAINER_NAME} > ${AIOPS_DIR}/${IMAGE_NAME}-${BUILD_NUMBER}/container-logs.txt 2>&1 || true
+
+                echo "AIOps report path:"
+                echo "${AIOPS_DIR}/${IMAGE_NAME}-${BUILD_NUMBER}"
+            '''
+
+            archiveArtifacts artifacts: '**/aiops-reports/**/*', allowEmptyArchive: true
+
+            echo 'Starting Restore Point Rollback'
+
+            sh '''
+                if [ -f rollback.sh ]; then
+                    chmod +x rollback.sh
+                    APP_NAME=${IMAGE_NAME} ./rollback.sh || true
+                else
+                    echo "rollback.sh not found, rollback skipped"
+                fi
+            '''
         }
 
         always {
             echo 'Pipeline Execution Finished'
-            sh 'docker ps || true'
-            sh "docker images | grep ${IMAGE_NAME} || true"
+
+            sh '''
+                docker ps || true
+                docker images | grep ${IMAGE_NAME} || true
+            '''
         }
     }
 }
